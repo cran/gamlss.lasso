@@ -1,11 +1,11 @@
-c1c6460dd8e725595052b076c0e6f3a2 *ChangeLog
-188e9ffb53aaadced4cfd4289ddd3adf *DESCRIPTION
+7111e35aa36565e33be35ea3dacc0544 *ChangeLog
+61391d21c980effb47f22876d948c1d4 *DESCRIPTION
 d5ec8f8bfd6a8dd3ac09e515ba7c2cd9 *NAMESPACE
-a929dc2f8ac001e95b3460fabdcc8014 *R/glmnet_gamlss.R
+da2c7e151235c173ee4d9e2a59d2a566 *R/glmnet_gamlss.R
 f026dc8c2f20775fc3900aee757abc99 *R/lars_gamlss.R
-40b7c9d2366890f51f8dfed8d86c5b2e *build/partial.rdb
+df5c3d59e32b23fa32e8e59320541299 *build/partial.rdb
 585621821fa7d2033030b70b03f76735 *man/gamlss.gnet.Rd
 d432bbcc54de5191141da7eb6a5dac08 *man/gamlss.lasso-package.Rd
 75c8f952116394aa8a296f5302751167 *man/gamlss.lrs.Rd
-fe13667f5adc7cd6a5fe3fcb8bca96d2 *man/gnet.Rd
+3e7d3be0121d43d4bc4bf36f6c3a9065 *man/gnet.Rd
 efe0fc8742169d1303cea1b005a9b313 *man/lrs.Rd

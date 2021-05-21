@@ -3,15 +3,16 @@
 \alias{gnet.control}
 
 \title{
-Elastic net in GAMLSS
+(Adaptive) elastic net in GAMLSS
 }
 \description{
-This function allows estimating the different components of a GAMLSS model (mean, sd. dev., skewness and kurtosis) using the elastic net (with lasso as default special case) estimation method via glmnet. This method is appropriate for models with many variables.
+This function allows estimating the different components of a GAMLSS model (location, shape, scale parameters) using the (adaptive) elastic net (with adaptive lasso as default special case) estimation method via \code{glmnet}. This method is appropriate for models with many variables.
 }
 \usage{
 gnet( X = NULL, x.vars = NULL, lambda = NULL, method = c("IC", "CV"), 
   type = c("agg", "sel"), ICpen = c("BIC", "HQC", "AIC"), CVp = 2, 
-  k.se = 0 ,subsets = NULL, sparse = FALSE, control = gnet.control(...), ...) 
+  k.se = 0, adaptive = 1, epsilon = 1/sqrt(dim(X)[1]), subsets = NULL, 
+  sparse = FALSE, control = gnet.control(...), ...) 
 gnet.control(family="gaussian", offset = NULL, alpha = 1, nlambda = 100, 
   lambda.min.ratio = 1e-3, standardize = TRUE, intercept = TRUE, thresh = 1e-07,
   dfmax = NULL, pmax = NULL, exclude = NULL, penalty.factor = NULL, lower.limits = -Inf,
@@ -26,8 +27,10 @@ gnet.control(family="gaussian", offset = NULL, alpha = 1, nlambda = 100,
   \item{ICpen}{ The penalization for the information criteria. If \code{ICpen="AIC"} or  \code{ICpen=2} the optimal lambda is computed by Akaike Information Criterion. If \code{ICpen="BIC"} the optimal lambda is computed by Bayesian Information Criterion.If \code{ICpen="HQC"} the optimal lambda is computed by Hannan-Quinn Information Criterion.}
   \item{CVp}{ The penalization for the cross-validation, establishes the power of the error term. By default is equal to 2, i.e. squared error.}
   \item{k.se}{ This parameter establishes how many times the standard deviation is summed to the mean to select the optimal lambda. By default is equal to 0.}
-  \item{subsets}{ The subsets for cross-validation, information criteria or bootstraping, by default 5 random fold are selected.}
-  \item{sparse}{ If sparse converts input matrix for \code{glmnet} into a sparse Matrix, may reduces computation speed for sparse designs.}
+  \item{adaptive}{ This parameter specifies if adaptive lasso shall be used, the default is 1. If \code{NULL} then standard lasso is used, otherwise adaptive lasso with penalty weights \code{(abs(beta)+epsilon)^(-adaptive)} where \code{beta} is chosen from an initial standard lasso estimate and \code{epsilon} is specified by the next parameter. Note, estimating standard lasso requires about half of computation time, but adaptive lasso has smaller bias and satiesfies the oracle property.}
+  \item{epsilon}{ This parameter specifies the adaptive lasso penalty weights. The default is \code{1/sqrt(dim(X)[1])}. }
+  \item{subsets}{ The subsets for cross-validation, information criteria or bootstraping, by default 5 random folds are selected.}
+  \item{sparse}{ If sparse converts input matrix for \code{glmnet} into a sparse Matrix, may reduces computation time for sparse designs.}
   \item{control}{List of further input parameters for glmnet, e.g. alpha for elastic net parameters.}
   \item{\dots}{for extra arguments}
 \item{family}{Either a character string representing
@@ -139,17 +142,25 @@ BETA<- cbind( "mu"=rbinom(d,1,.1), "sigma"= rbinom(d,1,.1)*.3)
 ysd<- exp(1 + tcrossprod( BETA[,2],X))
 data<- cbind(y=as.numeric(rnorm(n, sd=ysd))+t(tcrossprod( BETA[,1],X)), as.data.frame(X))
 
-# Estimating the model with gnet default setting
-mod <- gamlss(y~gnet(x.vars=names(data)[-1] ),
-              sigma.fo=~gnet(x.vars=names(data)[-1]), data=data, family=NO,
-              i.control = glim.control(cyc=1, bf.cyc=1))
+
+# Estimating the model using default setting: adaptive lasso with BIC tuning
+mod <- gamlss(y~gnet(x.vars=names(data)[-1]),
+              sigma.fo=~gnet(x.vars=names(data)[-1]), data=data,
+              family=NO, i.control = glim.control(cyc=1, bf.cyc=1))
+
+# Estimating the model with standard lasso (BIC tuning)
+mod.lasso <- gamlss(y~gnet(x.vars=names(data)[-1], adaptive=NULL),
+              sigma.fo=~gnet(x.vars=names(data)[-1], adaptive=NULL), data=data, 
+              family=NO, i.control = glim.control(cyc=1, bf.cyc=1))
 
 # Estimated paramters are available at
-rbind(true=BETA[,1],estimate=tail(getSmo(mod, "mu") ,1)[[1]]$beta )## beta for mu
-rbind(true=BETA[,2],estimate=tail(getSmo(mod, "sigma") ,1)[[1]]$beta )## beta for sigma
+rbind(true=BETA[,1],alasso=tail(getSmo(mod, "mu") ,1)[[1]]$beta,
+                    lasso=tail(getSmo(mod.lasso, "mu") ,1)[[1]]$beta) ##beta for mu
+rbind(true=BETA[,2],alasso=tail(getSmo(mod, "sigma") ,1)[[1]]$beta,
+                    lasso=tail(getSmo(mod.lasso, "sigma") ,1)[[1]]$beta)##beta for sigma
 
 # Estimating with other setting
-nfolds<- 10
+nfolds<- 6
 n<- dim(data)[1]
 # folds for cross-validation and bootstrap
 CVfolds<- lapply(as.data.frame(t(sapply(sample(rep_len(1:nfolds,length=n),replace=FALSE)
@@ -165,7 +176,7 @@ mod1 <- gamlss(y~gnet(x.vars=names(data)[-1], method="CV",type="agg", subsets=BO
 tail(getSmo(mod1, "mu") ,1)[[1]]$beta ## beta for mu
 tail(getSmo(mod1, "sigma") ,1)[[1]]$beta ## beta for sigma
 
-# Crossvalidation (with selection):
+# Cross-validation (with selection):
 mod2 <- gamlss(y~gnet(x.vars=names(data)[-1],method="CV",type="sel", subsets=CVfolds),
                sigma.fo=~gnet(x.vars=names(data)[-1],method="CV",type="sel", ICpen=2, 
                subsets=CVfolds), data=data, family=NO,

@@ -15,6 +15,8 @@ gnet <- function(
 						ICpen = c("BIC", "HQC", "AIC"),
 						CVp = 2,
 						k.se = 0,
+						adaptive = 1,
+						epsilon = 1/sqrt(dim(X)[1]),
             subsets = NULL,
 						sparse = FALSE,
           	control = gnet.control(...), ...) {
@@ -137,6 +139,8 @@ attr(xvar, "type") = type
 attr(xvar, "ICpen") = ICpen
 attr(xvar, "CVp") = CVp
 attr(xvar, "k.se") = k.se
+attr(xvar, "adaptive") = adaptive
+attr(xvar, "epsilon") = epsilon
 attr(xvar, "subsets") = subsets
 attr(xvar, "sparse") = sparse
        attr(xvar, "class") = "smooth"
@@ -172,11 +176,13 @@ gamlss.gnet <-function(x, y, w, xeval = NULL, ...) {
   if (is.null(xeval))
   {#fitting
      control <- as.list(attr(x, "control"))
-     X <- attr(x,"design")
+ #    X <- attr(x,"design")
      lambda <- attr(x,"lambda") 
      ICpen <- attr(x,"ICpen") 
      CVp <- attr(x,"CVp") 
      k.se <- attr(x,"k.se") 
+     adaptive <- attr(x,"adaptive") 
+     epsilon <- attr(x,"epsilon") 
      subsets <- attr(x,"subsets") 
      method <- attr(x,"method") 
      type <- attr(x,"type") 
@@ -184,8 +190,8 @@ gamlss.gnet <-function(x, y, w, xeval = NULL, ...) {
 	
 	lmod<- list()
 	nfolds<- length(subsets)
-  nobs <- dim(X)[1]
-	nvars <- dim(X)[2]
+  nobs <- dim(attr(x,"design"))[1]
+	nvars <- dim(attr(x,"design"))[2]
 	if(is.null(control$dfmax) ) control$dfmax<- nvars+1
 	if(is.null(control$pmax) ) control$pmax<- min(control$dfmax * 2 + 20,   nvars)
 	if(is.null(control$penalty.factor) ) control$penalty.factor<- rep.int(1, nvars)
@@ -196,7 +202,7 @@ gamlss.gnet <-function(x, y, w, xeval = NULL, ...) {
 ##		sxy <- # ## TODO speed up possible... compute sx outside...
 ##print(str(X))
 ##print(str(y))
-#		if(sparse) lambdamax<- max(abs(Matrix::crossprod(X,y)))/nobs else	lambdamax<- max(abs(crossprod(X,y)))/nobs
+#		if(sparse) lambdamax<- max(abs(Matrix::crossprod(attr(x,"design"),y)))/nobs else	lambdamax<- max(abs(crossprod(attr(x,"design"),y)))/nobs
 ##print("here")
 ##print(lambdamax)
 #		rangefactor<- 2 ## small extension for subset robustness
@@ -211,41 +217,44 @@ gamlss.gnet <-function(x, y, w, xeval = NULL, ...) {
 	}
 	OPTCRIT<- DF # same size
 
-	for(i.nets in 1:nfolds){
-			lmod[[i.nets]] <- 		glmnet(x = X[subsets[[i.nets]],], y = y[subsets[[i.nets]]], weights = w[subsets[[i.nets]]], lambda=lambda,	family = control$family,
-													offset = control$offset, nlambda = control$nlambda, lambda.min.ratio = control$lambda.min.ratio,
-                     standardize = control$standardize,
-                       intercept = control$intercept, 
-                          thresh = control$thresh,
-                           dfmax = control$dfmax,
-                            pmax = control$pmax,
-                         exclude = control$exclude,
-                  penalty.factor = control$penalty.factor,
-                    lower.limits = control$lower.limits, 
-                    upper.limits = control$upper.limits, 
-                           maxit = control$maxit,
-                   type.gaussian = control$type.gaussian,
-                   type.logistic = control$type.logistic
-)
-		DF[1:lmod[[i.nets]]$dim[2],i.nets]<- lmod[[i.nets]]$df
-		if(method=="IC"){
-			RSS<- (1-lmod[[i.nets]]$dev.ratio)* lmod[[i.nets]]$nulldev
-			OPTCRIT[1:lmod[[i.nets]]$dim[2],i.nets]<- log(RSS) + ICpen*lmod[[i.nets]]$df/nobs 
-		}
-		if(method=="CV"){
-			res<- y[-subsets[[i.nets]]] - t(t(as.matrix(X[-subsets[[i.nets]],]) %*% as.matrix(lmod[[i.nets]]$beta)) + lmod[[i.nets]]$a0)
-#			print(res)
-			OPTCRIT[1:lmod[[i.nets]]$dim[2],i.nets]<- apply(abs(res)^CVp,2, mean)
-		}
-	}#i.nets
-	## AGGHOO + ICagg 
-	DFmean<- apply(DF,1,mean, na.rm=TRUE)
-	optcritmean<- apply(OPTCRIT,1,mean)
-	if(nfolds>1) optcritsd<- apply(OPTCRIT,1,sd) else optcritsd<- 0
-	optid<-which.min(optcritmean+ k.se*optcritsd) ## 
+	pf<- control$penalty.factor
+	for(i.adaptive in 1:(as.numeric(!is.null(adaptive)) +1) ){
+		for(i.nets in 1:nfolds){
+			if(i.adaptive>1) pf<- (abs(lmod[[i.nets]]$beta[, optid])+epsilon)^(-adaptive)
+			lmod[[i.nets]] <- 		glmnet(x = attr(x,"design")[subsets[[i.nets]],], y = y[subsets[[i.nets]]], weights = w[subsets[[i.nets]]], lambda=lambda,	family = control$family,
+														offset = control$offset, nlambda = control$nlambda, lambda.min.ratio = control$lambda.min.ratio,
+		                   standardize = control$standardize,
+		                     intercept = control$intercept, 
+		                        thresh = control$thresh,
+		                         dfmax = control$dfmax,
+		                          pmax = control$pmax,
+		                       exclude = control$exclude,
+		                penalty.factor = pf,
+		                  lower.limits = control$lower.limits, 
+		                  upper.limits = control$upper.limits, 
+		                         maxit = control$maxit,
+		                 type.gaussian = control$type.gaussian,
+		                 type.logistic = control$type.logistic)
+			DF[1:lmod[[i.nets]]$dim[2],i.nets]<- lmod[[i.nets]]$df
+			if(method=="IC"){
+				RSS<- (1-lmod[[i.nets]]$dev.ratio)* lmod[[i.nets]]$nulldev
+				OPTCRIT[1:lmod[[i.nets]]$dim[2],i.nets]<- log(RSS) + ICpen*lmod[[i.nets]]$df/nobs 
+			}
+			if(method=="CV"){
+				res<- y[-subsets[[i.nets]]] - t(t(as.matrix(attr(x,"design")[-subsets[[i.nets]],]) %*% as.matrix(lmod[[i.nets]]$beta)) + lmod[[i.nets]]$a0)
+	#			print(res)
+				OPTCRIT[1:lmod[[i.nets]]$dim[2],i.nets]<- apply(abs(res)^CVp,2, mean)
+			}
+		}#i.nets
+		## AGGHOO + ICagg 
+		DFmean<- apply(DF,1,mean, na.rm=TRUE)
+		optcritmean<- apply(OPTCRIT,1,mean)
+		if(nfolds>1) optcritsd<- apply(OPTCRIT,1,sd) else optcritsd<- 0
+		optid<-which.min(optcritmean+ k.se*optcritsd) ## 
+
+	}#i.adaptive
 	fv<- numeric(nobs)
 
-#print(",1")
 
 	BETA<- matrix(,nvars,nfolds)
 	A0<- numeric(nfolds)
@@ -256,45 +265,51 @@ gamlss.gnet <-function(x, y, w, xeval = NULL, ...) {
 	BETAsel<- numeric(nvars)
 	A0sel<- numeric(1)
 ## another fit on full model
+
 	if(type=="sel"){# CV + IC select
-		subsets[[length(subsets)+1]] <- 1:nobs
-		i.nets<- nfolds+1
-			lmod[[i.nets]] <- 		glmnet(x = X[subsets[[i.nets]],], y = y[subsets[[i.nets]]], weights = w[subsets[[i.nets]]], lambda=lambda,	family = control$family,
-													offset = control$offset, nlambda = control$nlambda, lambda.min.ratio = control$lambda.min.ratio,
-                     standardize = control$standardize,
-                       intercept = control$intercept, 
-                          thresh = control$thresh,
-                           dfmax = control$dfmax,
-                            pmax = control$pmax,
-                         exclude = control$exclude,
-                  penalty.factor = control$penalty.factor,
-                    lower.limits = control$lower.limits, 
-                    upper.limits = control$upper.limits, 
-                           maxit = control$maxit,
-                   type.gaussian = control$type.gaussian,
-                   type.logistic = control$type.logistic
-)
-		fv<- lmod[[i.nets]]$a0[optid] + X %*% lmod[[i.nets]]$beta[,optid]
-		BETAsel<- lmod[[i.nets]]$beta[,optid]
-		A0sel<- lmod[[i.nets]]$a0[optid]
-		dffin<- lmod[[i.nets]]$df[optid]
+		pf<- control$penalty.factor
+		for(i.adaptive in 1:(as.numeric(!is.null(adaptive)) +1) ){
+			subsets[[length(subsets)+1]] <- 1:nobs
+			i.nets<- nfolds+1
+			if(i.adaptive>1) pf<- (abs(lmod[[i.nets]]$beta[, optid])+epsilon)^(-adaptive)
+				lmod[[i.nets]] <- 		glmnet(x = attr(x,"design")[subsets[[i.nets]],], y = y[subsets[[i.nets]]], weights = w[subsets[[i.nets]]], lambda=lambda,	family = control$family,
+														offset = control$offset, nlambda = control$nlambda, lambda.min.ratio = control$lambda.min.ratio,
+		                   standardize = control$standardize,
+		                     intercept = control$intercept, 
+		                        thresh = control$thresh,
+		                         dfmax = control$dfmax,
+		                          pmax = control$pmax,
+		                       exclude = control$exclude,
+		                penalty.factor = pf,
+		                  lower.limits = control$lower.limits, 
+		                  upper.limits = control$upper.limits, 
+		                         maxit = control$maxit,
+		                 type.gaussian = control$type.gaussian,
+		                 type.logistic = control$type.logistic)
+			fv<- lmod[[i.nets]]$a0[optid] + attr(x,"design") %*% lmod[[i.nets]]$beta[,optid]
+			BETAsel<- lmod[[i.nets]]$beta[,optid]
+			A0sel<- lmod[[i.nets]]$a0[optid]
+			dffin<- lmod[[i.nets]]$df[optid]
+		}#adaptive
 	} else {
 	## AGGHOO + IC agg 
 #print(",12")
-
 		for(i.nets in 1:nfolds){
 			BETAsel<- BETAsel + lmod[[i.nets]]$beta[,optid]/nfolds ## assuming equallty weighted folds, TODO could be generalised thus weighting based on subset size
 			A0sel<- A0sel + lmod[[i.nets]]$a0[optid]/nfolds
 		}
-		fv<- A0sel + X %*% BETAsel
+		fv<- A0sel + attr(x,"design") %*% BETAsel
 		if(all(fv==0)) fv= rep.int(1e-15,nobs) ## FZ: numerical issue... don't ask me why... it is hidden add.fit
 		dffin<- DFmean[optid]
 	}
 #	print(DF[optid,])
 	## last entry
-	lmod[[length(lmod)+1]]<- list(lambda=lambda, DF= DF, OPTCRIT=OPTCRIT,  optid=optid,  A0=A0, BETA=BETA, df=dffin, optcrit=optcritmean[optid], a0=A0sel, beta=BETAsel, optlambda= lambda[optid])
+	if(is.null(lambda)) lambda <- lmod[[length(lmod)]]$lambda # note 
+	lmod[[length(lmod)+1]]<- list(lambda=lambda, DF= DF, OPTCRIT=OPTCRIT,  optid=optid,  A0=A0, BETA=BETA, df=dffin, optcrit=optcritmean[optid], a0=A0sel, beta=BETAsel, optlambda= lambda[optid], scaled.beta = apply( attr(x,"design"),2,sd )*BETAsel)
 
 #print(",")
+#	Xmean <- apply( attr(x,"design"),1,mean )
+#	Xsd <- 
 
 		residuals <- y - fv
     list(fitted.values = fv, 
